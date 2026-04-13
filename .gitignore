@@ -1,0 +1,14 @@
+# Python
+wavelet_task/venv/
+wavelet_task/__pycache__/
+wavelet_task/*.pyc
+
+# Vim
+wavelet_task/*.swp
+wavelet_task/*.swo
+
+# Scratch / sandbox
+wavelet_task/sandnox/
+
+# Claude Code
+**/CLAUDE.md
