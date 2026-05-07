@@ -41,7 +41,7 @@ def add_salt_and_pepper_noise(image: np.ndarray, density: float, rng: np.random.
 
 if __name__ == "__main__":
 
-    img = np.array(Image.open("./media/cover512gray.jpg").convert("L"))
+    img = np.array(Image.open("./media/cat512.jpg").convert("L"))
 
 
     rng = np.random.default_rng(seed=42)

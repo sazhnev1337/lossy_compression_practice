@@ -3,6 +3,9 @@ import pywt
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from noise import add_salt_and_pepper_noise
+
+rng = np.random.default_rng(seed=42)
 
 
 def build_decomposition_image(coeffs: list) -> np.ndarray:
@@ -59,15 +62,18 @@ if __name__ == "__main__":
     WAVELET = "haar"
     LEVEL   = 2
 
-    img = np.array(Image.open("./media/cover512gray.jpg").convert("L"))
+    img = np.array(Image.open("./media/nature.jpg").convert("L"))
 
-    coeffs = pywt.wavedec2(img.astype(np.float64), wavelet=WAVELET, level=LEVEL)
+    # salt_and_pepper: density low=0.02, medium=0.05, high=0.15
+    DENSITY = 0.05
+    noisy        = add_salt_and_pepper_noise(img, density=DENSITY, rng=rng)
+    coeffs = pywt.wavedec2(noisy.astype(np.float64), wavelet=WAVELET, level=LEVEL)
 
     canvas = build_decomposition_image(coeffs)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-    axes[0].imshow(img, cmap="gray", vmin=0, vmax=255)
+    axes[0].imshow(noisy, cmap="gray", vmin=0, vmax=255)
     axes[0].set_title("Original")
     axes[0].axis("off")
 
@@ -77,5 +83,5 @@ if __name__ == "__main__":
     annotate_subbands(axes[1], coeffs)
 
     plt.tight_layout()
-    plt.savefig("./media/decomposition.png", dpi=150)
+    plt.savefig("./media/noise_nature_decomposition.png", dpi=150)
     plt.show()

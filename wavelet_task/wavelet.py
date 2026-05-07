@@ -6,12 +6,17 @@ import matplotlib.pyplot as plt
 from noise import add_gaussian_noise, add_salt_and_pepper_noise
 
 
-def threshold_coeffs(coeffs: list, threshold: float) -> list:
-    thresholded = [coeffs[0]]  # keep untouched
-    for level_detail in coeffs[1:]:
-        thresholded.append(
-            tuple(pywt.threshold(subband, threshold, mode="hard") for subband in level_detail)
-        )
+def threshold_coeffs(coeffs: list, threshold: float, mode: str = "hard") -> list:
+    """
+    Фильтруется только подполоса cD  (правый нижний квадрат)
+    """
+    thresholded = [coeffs[0]]  # аппроксимация не трогается
+    for cH, cV, cD in coeffs[1:]:
+        if mode == "hard_inverse":
+            cD_filt = np.where(np.abs(cD) < threshold, cD, 0.0)
+        else:
+            cD_filt = pywt.threshold(cD, threshold, mode=mode)
+        thresholded.append((cH, cV, cD_filt))
     return thresholded
 
 
@@ -27,33 +32,39 @@ def rmse(original: np.ndarray, restored: np.ndarray) -> float:
 
 
 if __name__ == "__main__":
-    WAVELET    = "haar"
-    LEVEL      = 4
-    NOISE_TYPE = "gaussian"   # "gaussian" | "salt_and_pepper"
-    # NOISE_TYPE = "salt_and_pepper"   # "gaussian" | "salt_and_pepper"
+    WAVELET    = "db1"
+    LEVEL      = 3
+    # NOISE_TYPE = "gaussian"
+    NOISE_TYPE = "salt_and_pepper"
 
-    # gaussian:        sigma   low=10, medium=25, high=50
+    # gaussian:        sigma   low=10, medium=25, high=40
     # salt_and_pepper: density low=0.02, medium=0.05, high=0.15
-    SIGMA   = 10
+    # SIGMA   = 10
+    # SIGMA   = 20
+    # SIGMA   = 30
+    # DENSITY = 0.02
+    # DENSITY = 0.05
     DENSITY = 0.15
 
-    img = np.array(Image.open("./media/cover512gray.jpg").convert("L"))
+    img = np.array(Image.open("./media/nature.jpg").convert("L"))
 
     rng = np.random.default_rng(seed=42)
+
     if NOISE_TYPE == "gaussian":
-        noisy    = add_gaussian_noise(img, sigma=SIGMA, rng=rng)
-        noise_tag = f"gauss_sig{SIGMA}"
+        noisy        = add_gaussian_noise(img, sigma=SIGMA, rng=rng)
+        noise_tag    = f"gauss_sig{SIGMA}"
+        thr_mode     = "hard"                    # режем мелкие шумовые коэффициенты
+        thresholds   = np.arange(0, 100, 2)
     elif NOISE_TYPE == "salt_and_pepper":
-        noisy    = add_salt_and_pepper_noise(img, density=DENSITY, rng=rng)
-        noise_tag = f"snp_d{DENSITY}"
+        noisy        = add_salt_and_pepper_noise(img, density=DENSITY, rng=rng)
+        noise_tag    = f"snp_d{DENSITY}"
+        thr_mode     = "hard_inverse"            # режем крупные выбросы
+        thresholds   = np.arange(0, 200, 2)
 
-
-    thresholds = np.arange(0, 100, 2)
     errors = []
     for t in thresholds:
-
         coeffs   = pywt.wavedec2(noisy.astype(np.float64), WAVELET, LEVEL)
-        coeffs_t = threshold_coeffs(coeffs, threshold=t)
+        coeffs_t = threshold_coeffs(coeffs, threshold=t, mode=thr_mode)
         restored = reconstruct(coeffs_t, wavelet=WAVELET)
         errors.append(rmse(img, restored))
 
@@ -75,7 +86,10 @@ if __name__ == "__main__":
 
     # --- Сохранение каждого порога отдельным файлом ---
     import os
-    preview_thresholds = [0, 10, 20, best_t, 50, 80]
+    if NOISE_TYPE == "gaussian":
+        preview_thresholds = [0, 10, 20, int(best_t), 50, 80]
+    else:
+        preview_thresholds = [10, 30, 60, int(best_t), 150, 250]
 
     out_dir = f"./media/thresholds_{noise_tag}"
     os.makedirs(out_dir, exist_ok=True)
@@ -85,7 +99,7 @@ if __name__ == "__main__":
 
     for t in preview_thresholds:
         c   = pywt.wavedec2(noisy.astype(np.float64), WAVELET, LEVEL)
-        c   = threshold_coeffs(c, threshold=t)
+        c   = threshold_coeffs(c, threshold=t, mode=thr_mode)
         r   = reconstruct(c, wavelet=WAVELET)
         err = rmse(img, r)
         tag = "_BEST" if t == best_t else ""
