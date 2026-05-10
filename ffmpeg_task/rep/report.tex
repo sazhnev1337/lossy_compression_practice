@@ -1,0 +1,181 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{fontspec}
+\usepackage[english, russian]{babel} % Russian — последний, значит основной
+
+\usepackage{geometry}
+\geometry{left=2cm, right=2cm, top=2cm, bottom=2cm}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\setmainfont{cmunrm.otf}[
+  BoldFont        = cmunbx.otf,
+  ItalicFont      = cmunti.otf,
+  BoldItalicFont  = cmunbi.otf
+]
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{subfiles}
+
+\begin{document}
+
+\section{Подготовка видеоматериала}
+
+\subsection{Скачивание видео}
+
+В качестве исходного материала использовался мультфильм «Вовка в тридевятом царстве» (1965).
+Видео скачивалось с YouTube с помощью утилиты \texttt{yt-dlp}:
+
+\begin{verbatim}
+yt-dlp --cookies-from-browser firefox \
+  --no-check-certificates \
+  --js-runtimes "deno:/home/user/.deno/bin/deno" \
+  --remote-components ejs:github \
+  -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" \
+  "https://youtu.be/YpygndkMSWA" \
+  -o vovka.mp4
+\end{verbatim}
+
+Флаг \texttt{-{}-cookies-from-browser firefox} необходим для авторизации на YouTube.
+Флаг \texttt{-{}-js-runtimes} указывает путь к JavaScript-рантайму \texttt{deno},
+который требуется для обхода защиты YouTube.
+
+\subsection{Вырезание фрагмента}
+
+Для экспериментов был вырезан фрагмент длительностью 15 секунд:
+
+\begin{verbatim}
+ffmpeg -i vovka.mp4 -ss 00:16:10 -t 15 -an fragment.mp4
+\end{verbatim}
+
+Параметр \texttt{-ss 00:16:10} задаёт начало фрагмента,
+\texttt{-t 15} — его длительность в секундах.
+
+Параметры полученного фрагмента можно проверить командой \texttt{ffprobe}:
+
+\begin{verbatim}
+ffprobe fragment.mp4
+\end{verbatim}
+
+Результат: видео H.264, разрешение 1896×1440, частота кадров 24~fps,
+аудио AAC 44100~Гц, длительность 15.01~с.
+
+
+
+\subsection{Кодирование с предсказанием вперёд на один кадр}
+
+Фрагмент был закодирован с использованием только P-кадров,
+где каждый кадр опирается на один предыдущий (\texttt{ref=1}).
+B-кадры отключены (\texttt{bframes=0}), I-кадры встречаются
+только в начале (\texttt{keyint=1000}).
+
+\begin{verbatim}
+ffmpeg -i "./source_media/fragment.mp4" \
+    -c:v libx265 \
+    -crf 23 \
+    -x265-params "keyint=1000:min-keyint=1000:bframes=0:ref=1" \
+    -an \
+    "./result_media/p_ref1.mp4"
+\end{verbatim}
+
+Параметр \texttt{crf=23} задаёт качество кодирования
+(чем меньше значение, тем выше качество и больше размер файла).
+Результирующий файл занял 10.8 МБ.
+
+
+
+\subsection{Кодирование с предсказанием вперёд на четыре кадра}
+
+Фрагмент был закодирован аналогично предыдущему пункту,
+однако параметр \texttt{ref} увеличен до 4.
+
+\begin{verbatim}
+ffmpeg -i "./source_media/fragment.mp4" \
+    -c:v libx265 \
+    -crf 23 \
+    -x265-params "keyint=1000:min-keyint=1000:bframes=0:ref=4" \
+    -an \
+    "./result_media/p_ref4.mp4"
+\end{verbatim}
+
+При \texttt{ref=4} каждый P-кадр может опираться на любой
+из четырёх предыдущих кадров. При этом каждый макроблок
+independently выбирает наилучший опорный кадр — один блок
+может быть предсказан из кадра №1, другой из кадра №3 и т.д.
+Это позволяет точнее описать движение и уменьшить остаточную
+разницу, что теоретически должно дать файл меньшего размера
+по сравнению с \texttt{ref=1} при том же качестве.
+Результирующий файл занял 10.5 МБ.
+
+
+\subsection{Кодирование с использованием P и B-кадров}
+
+Фрагмент был закодирован с разрешёнными B-кадрами.
+По сравнению с предыдущим пунктом изменён только параметр
+\texttt{bframes=4} — между P-кадрами допускается до четырёх
+B-кадров подряд.
+
+\begin{verbatim}
+ffmpeg -i "./source_media/fragment.mp4" \
+    -c:v libx265 \
+    -crf 23 \
+    -x265-params "keyint=1000:min-keyint=1000:bframes=4:ref=4" \
+    -an \
+    "./result_media/pb.mp4"
+\end{verbatim}
+
+B-кадры используют двунаправленное предсказание — каждый блок
+описывается относительно как предыдущих, так и последующих кадров.
+Это даёт наиболее точное предсказание среди всех трёх вариантов,
+поэтому ожидается наименьший размер файла.
+Результирующий файл занял 7.4 МБ.
+
+\subsection{Сравнение результатов}
+
+Все результирующие файлы находятся в папке \texttt{results\_media}.
+Там же находится файл \texttt{comparison.mp4}, полученный командой:
+
+\begin{verbatim}
+ffmpeg -i p_ref1.mp4 -i p_ref4.mp4 -i pb.mp4 \
+    -filter_complex "\
+    [0:v]drawtext=text='ref=1':fontsize=40:fontcolor=white:x=10:y=10[v0]; \
+    [1:v]drawtext=text='ref=4':fontsize=40:fontcolor=white:x=10:y=10[v1]; \
+    [2:v]drawtext=text='P+B':fontsize=40:fontcolor=white:x=10:y=10[v2]; \
+    [v0][v1][v2]hstack=inputs=3" \
+    comparison.mp4
+\end{verbatim}
+
+Файл содержит три видео, расположенных в ряд. В левом верхнем углу
+каждого из них есть подпись, обозначающая тип кодирования.
+
+Размеры полученных файлов приведены в таблице~\ref{tab:sizes}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Вариант кодирования} & \textbf{Размер файла, МБ} \\
+\hline
+Только P-кадры, \texttt{ref=1} & 10.8 \\
+Только P-кадры, \texttt{ref=4} & 10.5 \\
+P и B-кадры, \texttt{ref=4}    & 7.4  \\
+\hline
+\end{tabular}
+\caption{Размеры файлов после кодирования}
+\label{tab:sizes}
+\end{table}
+
+Результаты соответствуют теоретическим ожиданиям: добавление B-кадров
+даёт наибольший выигрыш в сжатии — файл уменьшился примерно в 1.5 раза
+по сравнению с вариантом \texttt{ref=1}. Разница между \texttt{ref=1}
+и \texttt{ref=4} незначительна (10.8 против 10.5~МБ), что говорит о том,
+что для данного материала увеличение числа опорных кадров даёт малый
+эффект.
+
+Визуальных различий между тремя вариантами обнаружено не было —
+все три видео субъективно выглядят одинаково при одном значении
+параметра \texttt{crf=23}.
+
+
+\end{document}
